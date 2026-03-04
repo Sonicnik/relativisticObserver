@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RELATIVISTIC OBSERVER</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+  #glCanvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+
+  #webcam, #maskCanvas { display: none !important; }
+
+  /* Subtle scanline atmosphere */
+  #scanlines {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 3px,
+      rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px
+    );
+    pointer-events: none; z-index: 5;
+  }
+
+  /* ---- LOADING SCREEN ---- */
+  #loading {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #000;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    font-family: 'Share Tech Mono', monospace;
+    transition: opacity 1.2s ease;
+  }
+
+  .load-title {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: clamp(1.4rem, 4vw, 2.8rem);
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+
+  .load-sub {
+    font-size: 0.7rem;
+    color: rgba(0, 210, 255, 0.6);
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    margin-bottom: 2.5rem;
+  }
+
+  .load-bar-wrap {
+    width: 220px; height: 2px;
+    background: rgba(255,255,255,0.1);
+    margin-bottom: 1.2rem;
+    overflow: hidden;
+  }
+
+  .load-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #0d6efd, #00d2ff);
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+
+  .load-status {
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 0.2em;
+    animation: blink 1.2s step-end infinite;
+  }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    z-index: 10; pointer-events: none;
+    font-family: 'Share Tech Mono', monospace;
+    display: none;
+  }
+
+  /* Corner brackets */
+  .corner {
+    position: absolute; width: 20px; height: 20px;
+    border-color: rgba(255,255,255,0.18); border-style: solid;
+    border-width: 0;
+  }
+  .c-tl { top: 16px; left: 16px; border-top-width: 1px; border-left-width: 1px; }
+  .c-tr { top: 16px; right: 16px; border-top-width: 1px; border-right-width: 1px; }
+  .c-bl { bottom: 16px; left: 16px; border-bottom-width: 1px; border-left-width: 1px; }
+  .c-br { bottom: 16px; right: 16px; border-bottom-width: 1px; border-right-width: 1px; }
+
+  .hud-label {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 0.55rem; font-weight: 300;
+    color: rgba(255,255,255,0.25);
+    letter-spacing: 0.4em; text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+
+  /* Top-left: title */
+  .hud-title {
+    position: absolute; top: 24px; left: 28px;
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 0.6rem; font-weight: 300;
+    color: rgba(255,255,255,0.22);
+    letter-spacing: 0.45em; text-transform: uppercase;
+  }
+
+  /* Top-right: readouts */
+  .hud-readouts {
+    position: absolute; top: 22px; right: 28px;
+    text-align: right;
+  }
+
+  .readout-val {
+    font-size: 2rem; color: #fff;
+    letter-spacing: 0.04em;
+    transition: color 0.4s, text-shadow 0.4s;
+    line-height: 1;
+  }
+
+  .readout-val.glow {
+    color: #00d2ff;
+    text-shadow: 0 0 24px rgba(0, 210, 255, 0.7);
+  }
+
+  .readout-unit {
+    font-size: 0.65rem; color: rgba(255,255,255,0.35);
+    vertical-align: super; margin-left: 3px;
+  }
+
+  /* Right side: β bar */
+  .beta-bar-wrap {
+    position: absolute; top: 50%; right: 22px;
+    transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+  }
+
+  .beta-bar-label {
+    font-size: 0.55rem; color: rgba(255,255,255,0.2); letter-spacing: 0.1em;
+  }
+
+  .beta-bar-track {
+    width: 3px; height: 160px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.1);
+    position: relative; overflow: hidden;
+  }
+
+  .beta-bar-fill {
+    position: absolute; bottom: 0; left: 0; width: 100%;
+    background: linear-gradient(to top, #ff3b30, #ffcc00, #00d2ff);
+    height: 0%; transition: height 0.12s linear;
+  }
+
+  /* Bottom-left: effect indicators */
+  .effects-list {
+    position: absolute; bottom: 30px; left: 28px;
+  }
+
+  .fx-item {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px; opacity: 0.18;
+    transition: opacity 0.6s ease;
+  }
+
+  .fx-item.on { opacity: 1; }
+
+  .fx-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    flex-shrink: 0;
+    transition: background 0.5s, box-shadow 0.5s;
+  }
+
+  .fx-item.on .fx-dot {
+    background: #00d2ff;
+    box-shadow: 0 0 8px rgba(0, 210, 255, 0.9);
+  }
+
+  .fx-name {
+    font-size: 0.58rem; color: rgba(255,255,255,0.4);
+    letter-spacing: 0.18em; text-transform: uppercase;
+    transition: color 0.5s;
+  }
+
+  .fx-item.on .fx-name { color: rgba(255,255,255,0.85); }
+
+  /* Bottom-center: instruction */
+  #instruction {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.62rem; color: rgba(255,255,255,0.3);
+    letter-spacing: 0.28em; text-transform: uppercase;
+    text-align: center; white-space: nowrap;
+    transition: opacity 0.8s ease;
+  }
+
+  /* Gamma readout block */
+  .gamma-block { margin-top: 14px; }
+</style>
+</head>
+<body>
+
+<canvas id="glCanvas"></canvas>
+<video id="webcam" autoplay muted playsinline></video>
+<canvas id="maskCanvas"></canvas>
+<div id="scanlines"></div>
+
+<!-- Loading screen -->
+<div id="loading">
+  <div class="load-title">RELATIVISTIC OBSERVER</div>
+  <div class="load-sub">Special Relativity — Live Installation</div>
+  <div class="load-bar-wrap"><div class="load-bar-fill" id="loadBar"></div></div>
+  <div class="load-status" id="loadStatus">INITIALISING...</div>
+</div>
+
+<!-- HUD overlay -->
+<div id="hud">
+  <div class="corner c-tl"></div>
+  <div class="corner c-tr"></div>
+  <div class="corner c-bl"></div>
+  <div class="corner c-br"></div>
+
+  <div class="hud-title">RELATIVISTIC OBSERVER &nbsp;/&nbsp; SR-1</div>
+
+  <div class="hud-readouts">
+    <div class="hud-label">Velocity</div>
+    <div class="readout-val" id="betaOut">0.000<span class="readout-unit">c</span></div>
+    <div class="gamma-block">
+      <div class="hud-label">Lorentz Factor</div>
+      <div class="readout-val" id="gammaOut">1.000<span class="readout-unit">γ</span></div>
+    </div>
+  </div>
+
+  <div class="beta-bar-wrap">
+    <div class="beta-bar-label">c</div>
+    <div class="beta-bar-track">
+      <div class="beta-bar-fill" id="betaBarFill"></div>
+    </div>
+    <div class="beta-bar-label">0</div>
+  </div>
+
+  <div class="effects-list">
+    <div class="fx-item" id="fx-aber">
+      <div class="fx-dot"></div>
+      <div class="fx-name">Stellar Aberration</div>
+    </div>
+    <div class="fx-item" id="fx-dopp">
+      <div class="fx-dot"></div>
+      <div class="fx-name">Doppler Shift</div>
+    </div>
+    <div class="fx-item" id="fx-terr">
+      <div class="fx-dot"></div>
+      <div class="fx-name">Terrell Rotation</div>
+    </div>
+    <div class="fx-item" id="fx-lore">
+      <div class="fx-dot"></div>
+      <div class="fx-name">Lorentz Contraction</div>
+    </div>
+  </div>
+
+  <div id="instruction">SPREAD YOUR ARMS TO ACCELERATE</div>
+</div>
+
+<!-- Three.js r128 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- MediaPipe Pose + Camera utils -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════════
+//  GLSL SHADERS
+// ═══════════════════════════════════════════════════════════
+
+const VERT = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = vec4(position, 1.0);
+}`;
+
+const FRAG = `
+precision mediump float;
+
+uniform sampler2D uCamera;    // live webcam frame
+uniform sampler2D uMask;      // MediaPipe person segmentation (0=bg, 1=person)
+uniform float     uBeta;      // v/c  [0, 0.99]
+uniform vec2      uCenter;    // person centroid in UV space (y-up)
+uniform float     uAspect;    // viewport w/h
+
+varying vec2 vUv;
+
+#define PI 3.14159265359
+
+// ── Colour-space helpers ─────────────────────────────────
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0*d + 1e-10)),
+              d / (q.x + 1e-10), q.x);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+  vec2 uv = vUv;
+
+  float beta  = uBeta;
+  float beta2 = beta * beta;
+  float gamma = 1.0 / sqrt(max(1.0 - beta2, 1e-4));
+
+  // ── 1. RELATIVISTIC ABERRATION ───────────────────────────
+  // Vector from person centre → current pixel (aspect-corrected)
+  vec2 delta = uv - uCenter;
+  delta.x   *= uAspect;
+  float dist  = length(delta);
+  vec2  dir   = dist > 1e-3 ? delta / dist : vec2(0.0, 1.0);
+
+  // θ: angle from travel axis  (dist=0 → looking straight ahead)
+  float theta    = atan(dist * 2.8);
+  float cosT     = cos(theta);
+  float sinT     = sin(theta);
+
+  // Observed angle: sin θ' = sin θ / [γ (1 + β cos θ)]
+  float sinTp = sinT / max(gamma * (1.0 + beta * cosT), 1e-3);
+  sinTp       = clamp(sinTp, -0.9999, 0.9999);
+  float thetaP = asin(sinTp);
+
+  // Map back to UV displacement (undo aspect)
+  float aberDist = tan(thetaP) / 2.8;
+  vec2  aberDir  = dir;
+  aberDir.x     /= uAspect;
+  aberDir        = length(aberDir) > 1e-3 ? normalize(aberDir) : aberDir;
+  vec2 dUV       = uCenter + aberDir * aberDist;
+
+  // ── 2. TERRELL ROTATION (approximation) ─────────────────
+  // At relativistic speeds, objects beside the traveller appear rotated.
+  // Approximated as a β²-scaled radial UV stretch away from centre.
+  float edge    = smoothstep(0.05, 0.55, dist);
+  float terrell = beta2 * edge;
+  dUV          += terrell * (uv - uCenter) * 0.22;
+
+  dUV = clamp(dUV, 0.001, 0.999);
+
+  // ── 3. SAMPLE CAMERA ────────────────────────────────────
+  vec4 distCol = texture2D(uCamera, dUV);
+  vec4 origCol = texture2D(uCamera, uv);
+
+  // ── 4. DOPPLER COLOUR SHIFT ─────────────────────────────
+  // Centre of frame → blueshift  |  edges → redshift
+  float doppFactor = (dist - 0.22) * beta * 2.6;
+  vec3  hsv        = rgb2hsv(distCol.rgb);
+  hsv.x  = fract(hsv.x + doppFactor * 0.13);
+  hsv.y  = clamp(hsv.y + abs(doppFactor) * beta * 0.38, 0.0, 1.0);
+  hsv.z  = clamp(hsv.z * (1.0 - doppFactor * beta * 0.38), 0.0, 2.0);
+  vec3 doppCol = hsv2rgb(hsv);
+
+  vec3 col = mix(distCol.rgb, doppCol, min(beta * 2.8, 1.0));
+
+  // ── 5. SEARCH-CONE VIGNETTE ──────────────────────────────
+  // Light aberrates forward: edges darken and collapse at high β
+  col = mix(col, vec3(0.0), beta2 * edge * 0.88);
+
+  // ── 6. FORWARD BLUE GLOW ────────────────────────────────
+  float proximity = 1.0 - smoothstep(0.0, 0.32, dist);
+  col += vec3(0.25, 0.55, 1.0) * beta2 * proximity * 0.65;
+
+  // ── 7. CHROMATIC ABERRATION (β > 0.5) ───────────────────
+  if (beta > 0.5) {
+    float ca    = (beta - 0.5) * 0.018 * edge;
+    vec2  caOff = dir / vec2(uAspect, 1.0) * ca;
+    col.r = mix(col.r,
+                texture2D(uCamera, clamp(dUV + caOff, 0.001, 0.999)).r, 0.55);
+    col.b = mix(col.b,
+                texture2D(uCamera, clamp(dUV - caOff, 0.001, 0.999)).b, 0.55);
+  }
+
+  // ── 8. PERSON MASK — keep the traveller undistorted ─────
+  float mask     = texture2D(uMask, uv).r;
+  float softMask = smoothstep(0.18, 0.72, mask);
+  col = mix(col, origCol.rgb, softMask);
+
+  gl_FragColor = vec4(clamp(col, 0.0, 2.0), 1.0);
+}`;
+
+// ═══════════════════════════════════════════════════════════
+//  THREE.JS SETUP
+// ═══════════════════════════════════════════════════════════
+
+const canvas     = document.getElementById('glCanvas');
+const videoEl    = document.getElementById('webcam');
+const maskCanvas = document.getElementById('maskCanvas');
+const maskCtx    = maskCanvas.getContext('2d', { willReadFrequently: true });
+
+// Default mask canvas size until we know the video dimensions
+maskCanvas.width  = 640;
+maskCanvas.height = 480;
+maskCtx.fillStyle = '#000';
+maskCtx.fillRect(0, 0, 640, 480);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+const scene = new THREE.Scene();
+const ortho  = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+const maskTex = new THREE.CanvasTexture(maskCanvas);
+maskTex.minFilter = THREE.LinearFilter;
+maskTex.magFilter = THREE.LinearFilter;
+
+const uniforms = {
+  uCamera : { value: null },
+  uMask   : { value: maskTex },
+  uBeta   : { value: 0.0 },
+  uCenter : { value: new THREE.Vector2(0.5, 0.5) },
+  uAspect : { value: window.innerWidth / window.innerHeight },
+};
+
+const quad = new THREE.Mesh(
+  new THREE.PlaneGeometry(2, 2),
+  new THREE.ShaderMaterial({
+    uniforms, vertexShader: VERT, fragmentShader: FRAG,
+    depthTest: false, depthWrite: false,
+  })
+);
+scene.add(quad);
+
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+
+let videoTex    = null;
+let targetBeta  = 0.0;
+let currentBeta = 0.0;
+let personCtr   = { x: 0.5, y: 0.5 };
+
+// ═══════════════════════════════════════════════════════════
+//  POSE SCORING
+// ═══════════════════════════════════════════════════════════
+
+function scorePose(lm) {
+  if (!lm || lm.length < 25) return 0;
+
+  const lw = lm[15], rw = lm[16];   // wrists
+  const ls = lm[11], rs = lm[12];   // shoulders
+  const lh = lm[23], rh = lm[24];   // hips
+
+  // ARM SPREAD: wrist spread normalised to shoulder width
+  const wSpread  = Math.abs(lw.x - rw.x);
+  const shWidth  = Math.abs(ls.x - rs.x) + 0.001;
+  const ratio    = wSpread / shWidth;
+  const spread   = Math.max(0, (ratio - 0.85) / 1.4);   // 0 neutral → 1 fully extended
+
+  // ARM ELEVATION: wrists above shoulder line
+  const shY      = (ls.y + rs.y) / 2;
+  const lElev    = Math.max(0, shY - lw.y);
+  const rElev    = Math.max(0, shY - rw.y);
+  const elev     = Math.min(1.0, (lElev + rElev) * 2.5);
+
+  // Combine: spread is primary driver, elevation gives boost
+  return Math.min(1.0, spread * 0.65 + elev * 0.35);
+}
+
+function bodyCenter(lm) {
+  // Average of shoulders + hips gives stable torso midpoint
+  const cx = (lm[11].x + lm[12].x + lm[23].x + lm[24].x) / 4;
+  const cy = (lm[11].y + lm[12].y + lm[23].y + lm[24].y) / 4;
+  return { x: cx, y: 1.0 - cy };   // flip y for shader (y-up)
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MEDIAPIPE CALLBACK
+// ═══════════════════════════════════════════════════════════
+
+function onPoseResults(results) {
+  // --- Update segmentation mask ---
+  if (results.segmentationMask) {
+    const m = results.segmentationMask;
+    const mw = m.width  || videoEl.videoWidth  || 640;
+    const mh = m.height || videoEl.videoHeight || 480;
+    if (maskCanvas.width !== mw || maskCanvas.height !== mh) {
+      maskCanvas.width  = mw;
+      maskCanvas.height = mh;
+    }
+    maskCtx.drawImage(m, 0, 0, mw, mh);
+    maskTex.needsUpdate = true;
+  }
+
+  // --- Update velocity target from pose ---
+  if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+    targetBeta = scorePose(results.poseLandmarks) * 0.99;
+    personCtr  = bodyCenter(results.poseLandmarks);
+  } else {
+    targetBeta = 0;
+    // personCtr stays at last known position
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+
+function setStatus(msg, pct) {
+  document.getElementById('loadStatus').textContent = msg;
+  if (pct !== undefined)
+    document.getElementById('loadBar').style.width = pct + '%';
+}
+
+async function init() {
+  setStatus('REQUESTING CAMERA ACCESS...', 20);
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+  } catch (e) {
+    setStatus('⚠ CAMERA DENIED — please allow camera access and reload', 0);
+    return;
+  }
+
+  videoEl.srcObject = stream;
+  await new Promise(res => { videoEl.onloadedmetadata = res; });
+  videoEl.play();
+
+  maskCanvas.width  = videoEl.videoWidth  || 640;
+  maskCanvas.height = videoEl.videoHeight || 480;
+  maskCtx.fillStyle = '#000';
+  maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+  videoTex = new THREE.VideoTexture(videoEl);
+  videoTex.minFilter = THREE.LinearFilter;
+  videoTex.magFilter = THREE.LinearFilter;
+  uniforms.uCamera.value = videoTex;
+
+  setStatus('LOADING POSE DETECTION...', 50);
+
+  const pose = new Pose({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+  });
+
+  pose.setOptions({
+    modelComplexity      : 1,
+    smoothLandmarks      : true,
+    enableSegmentation   : true,
+    smoothSegmentation   : true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence : 0.5,
+  });
+
+  pose.onResults(onPoseResults);
+
+  setStatus('CALIBRATING SENSORS...', 75);
+
+  const mpCam = new Camera(videoEl, {
+    onFrame : async () => { await pose.send({ image: videoEl }); },
+    width   : videoEl.videoWidth  || 1280,
+    height  : videoEl.videoHeight || 720,
+  });
+
+  await mpCam.start();
+
+  setStatus('ONLINE', 100);
+
+  // Fade out loading screen
+  setTimeout(() => {
+    const ld = document.getElementById('loading');
+    ld.style.opacity = '0';
+    setTimeout(() => {
+      ld.style.display = 'none';
+      document.getElementById('hud').style.display = 'block';
+    }, 1200);
+  }, 400);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HUD UPDATE
+// ═══════════════════════════════════════════════════════════
+
+function updateHUD(b) {
+  const gamma = 1.0 / Math.sqrt(Math.max(1 - b * b, 1e-4));
+  const isHigh = b > 0.88;
+
+  const betaEl  = document.getElementById('betaOut');
+  const gammaEl = document.getElementById('gammaOut');
+
+  betaEl.innerHTML  = b.toFixed(3) + '<span class="readout-unit">c</span>';
+  gammaEl.innerHTML = gamma.toFixed(3) + '<span class="readout-unit">γ</span>';
+
+  betaEl.classList.toggle('glow', isHigh);
+  gammaEl.classList.toggle('glow', isHigh);
+
+  document.getElementById('betaBarFill').style.height = (b * 100).toFixed(1) + '%';
+
+  document.getElementById('fx-aber').classList.toggle('on', b > 0.04);
+  document.getElementById('fx-dopp').classList.toggle('on', b > 0.14);
+  document.getElementById('fx-terr').classList.toggle('on', b > 0.28);
+  document.getElementById('fx-lore').classList.toggle('on', b > 0.50);
+
+  document.getElementById('instruction').style.opacity = b > 0.08 ? '0' : '1';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER LOOP
+// ═══════════════════════════════════════════════════════════
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  // β smoothing: quick ramp-up, slow momentum decay (feels heavy)
+  const rate = targetBeta > currentBeta ? 0.09 : 0.022;
+  currentBeta += (targetBeta - currentBeta) * rate;
+  currentBeta  = Math.max(0, Math.min(0.99, currentBeta));
+
+  uniforms.uBeta.value = currentBeta;
+  uniforms.uCenter.value.set(personCtr.x, personCtr.y);
+  uniforms.uAspect.value = window.innerWidth / window.innerHeight;
+
+  if (videoTex) videoTex.needsUpdate = true;
+
+  updateHUD(currentBeta);
+  renderer.render(scene, ortho);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════════
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  uniforms.uAspect.value = window.innerWidth / window.innerHeight;
+});
+
+// ═══════════════════════════════════════════════════════════
+//  GO
+// ═══════════════════════════════════════════════════════════
+
+init();
+animate();
+</script>
+</body>
+</html>
