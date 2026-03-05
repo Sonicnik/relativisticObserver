@@ -43,7 +43,10 @@
     let prevHandPos = { x: 0, y: 0 };
     let handVelocity = { x: 0, y: 0 };
 
-    const BH_MASS = 5000;          // Gravity strength
+    // TUNED VARIABLES
+    const BH_MASS = 18000;         // Stronger gravitational pull
+    const THROW_DAMPENING = 0.25;  // Reduces wild initial velocity so stars feel heavy
+    const BOUNCE_RESTITUTION = 0.7; // Bounciness of the screen edges
     const ROCHE_LIMIT = 200;       // Distance at which stars get shredded
     const EVENT_HORIZON = 40;      // Distance at which matter is consumed
 
@@ -127,8 +130,8 @@
                 drawStar(heldStar);
             } else if (!currentlyPinching && isPinching && heldStar) {
                 // Released the pinch -> Throw the star!
-                heldStar.vx = handVelocity.x * 0.8;
-                heldStar.vy = handVelocity.y * 0.8;
+                heldStar.vx = handVelocity.x * THROW_DAMPENING;
+                heldStar.vy = handVelocity.y * THROW_DAMPENING;
                 stars.push(heldStar);
                 heldStar = null;
             }
@@ -205,6 +208,24 @@
 
             s.x += s.vx;
             s.y += s.vy;
+
+            // Screen Edge Collisions
+            if (s.x - 8 < 0) { 
+                s.x = 8; 
+                s.vx *= -BOUNCE_RESTITUTION; 
+            }
+            if (s.x + 8 > canvasElement.width) { 
+                s.x = canvasElement.width - 8; 
+                s.vx *= -BOUNCE_RESTITUTION; 
+            }
+            if (s.y - 8 < 0) { 
+                s.y = 8; 
+                s.vy *= -BOUNCE_RESTITUTION; 
+            }
+            if (s.y + 8 > canvasElement.height) { 
+                s.y = canvasElement.height - 8; 
+                s.vy *= -BOUNCE_RESTITUTION; 
+            }
 
             drawStar(s);
         }
