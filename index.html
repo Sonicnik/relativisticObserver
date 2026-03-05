@@ -22,6 +22,7 @@
             <div class="role-right">RIGHT PLAYER: Control the Black Hole</div>
         </div>
         <p id="status">Loading Dual AI Models... Please wait.</p>
+        <p id="debug" style="font-size: 12px; color: #7fffd4; margin-top: 6px;">Debug: Faces 0 | Hands 0</p>
     </div>
     
     <video id="webcam" autoplay playsinline style="display:none;"></video>
@@ -38,6 +39,7 @@
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
     const statusText = document.getElementById('status');
+    const debugText = document.getElementById('debug');
 
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
@@ -111,6 +113,7 @@
             detectedFaces = faceResults.faceLandmarks || [];
             detectedHands = handResults.landmarks || [];
             currentVideoFrame = videoElement;
+            debugText.innerText = `Debug: Faces ${detectedFaces.length} | Hands ${detectedHands.length}`;
         }
         requestAnimationFrame(processFrame);
     }
