@@ -3,15 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <title>HKU Astrophysics: Two-Player Spaghettification Sandbox</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <style>
         body { margin: 0; padding: 0; background-color: black; overflow: hidden; color: white; font-family: sans-serif; }
         canvas { display: block; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); /* Mirror display */ }
+        
+        /* UI Styling */
         #ui { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
         h1 { margin: 0; font-size: 24px; text-shadow: 0 0 10px #00ffff; }
         p { font-size: 16px; color: #aaa; margin-top: 5px; }
         .roles { display: flex; gap: 50px; margin-top: 15px; font-weight: bold; }
         .role-left { color: #00ffff; }
         .role-right { color: #ff9600; }
+
+        /* Debug Module Styling */
+        #debug-panel {
+            position: absolute; top: 20px; right: 20px; z-index: 10;
+            background: rgba(0, 0, 15, 0.8); border: 1px solid #333;
+            padding: 15px; font-family: monospace; font-size: 14px;
+            border-radius: 5px; pointer-events: none;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.1);
+        }
+        #debug-panel h3 { margin: 0 0 10px 0; color: #fff; font-size: 14px; border-bottom: 1px solid #555; padding-bottom: 5px;}
+        .debug-row { margin-bottom: 5px; display: flex; justify-content: space-between; gap: 20px;}
+        .status-on { color: #00ff00; font-weight: bold; text-shadow: 0 0 5px #00ff00; }
+        .status-off { color: #ff0033; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -22,24 +40,32 @@
             <div class="role-right">RIGHT PLAYER: Control the Black Hole</div>
         </div>
         <p id="status">Loading Dual AI Models... Please wait.</p>
-        <p id="debug" style="font-size: 12px; color: #7fffd4; margin-top: 6px;">Debug: Faces 0 | Hands 0</p>
+    </div>
+
+    <div id="debug-panel">
+        <h3>SYSTEM DIAGNOSTICS</h3>
+        <div class="debug-row">
+            <span>Left Zone (Thrower Hand):</span>
+            <span id="debug-left" class="status-off">OFFLINE</span>
+        </div>
+        <div class="debug-row">
+            <span>Right Zone (Black Hole Face):</span>
+            <span id="debug-right" class="status-off">OFFLINE</span>
+        </div>
     </div>
     
     <video id="webcam" autoplay playsinline style="display:none;"></video>
     <canvas id="output_canvas"></canvas>
 
-<script type="module">
-    import {
-        FaceLandmarker,
-        HandLandmarker,
-        FilesetResolver
-    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-
+<script>
     const videoElement = document.getElementById('webcam');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
     const statusText = document.getElementById('status');
-    const debugText = document.getElementById('debug');
+    
+    // Debug DOM Elements
+    const debugLeft = document.getElementById('debug-left');
+    const debugRight = document.getElementById('debug-right');
 
     canvasElement.width = window.innerWidth;
     canvasElement.height = window.innerHeight;
@@ -54,7 +80,6 @@
     let prevHandPos = { x: 0, y: 0 };
     let handVelocity = { x: 0, y: 0 };
 
-    // Tuned physics variables from previous feedback
     const BH_MASS = 18000;         
     const THROW_DAMPENING = 0.25;  
     const BOUNCE_RESTITUTION = 0.7; 
@@ -66,69 +91,29 @@
     let detectedHands = [];
     let currentVideoFrame = null;
 
-    // --- MEDIAPIPE TASKS INITIALIZATION ---
-    let faceLandmarker = null;
-    let handLandmarker = null;
+    // --- MEDIAPIPE INITIALIZATION ---
+    const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+    faceMesh.setOptions({ maxNumFaces: 2, refineLandmarks: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    faceMesh.onResults((results) => { detectedFaces = results.multiFaceLandmarks || []; });
 
-    async function initializeVisionTasks() {
-        const vision = await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
-        );
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    hands.onResults((results) => { detectedHands = results.multiHandLandmarks || []; });
 
-        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-            baseOptions: {
-                modelAssetPath:
-                    "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-            },
-            numFaces: 2,
-            outputFaceBlendshapes: false,
-            runningMode: "VIDEO"
-        });
-
-        handLandmarker = await HandLandmarker.createFromOptions(vision, {
-            baseOptions: {
-                modelAssetPath:
-                    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
-            },
-            numHands: 2,
-            runningMode: "VIDEO"
-        });
-    }
-
-    async function startCamera() {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720 }
-        });
-        videoElement.srcObject = stream;
-        await videoElement.play();
-        statusText.innerText = "System Active. Step into your zones.";
-        requestAnimationFrame(processFrame);
-    }
-
-    function processFrame() {
-        if (videoElement.readyState >= 2 && faceLandmarker && handLandmarker) {
-            const now = performance.now();
-            const faceResults = faceLandmarker.detectForVideo(videoElement, now);
-            const handResults = handLandmarker.detectForVideo(videoElement, now);
-            detectedFaces = faceResults.faceLandmarks || [];
-            detectedHands = handResults.landmarks || [];
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
             currentVideoFrame = videoElement;
-            debugText.innerText = `Debug: Faces ${detectedFaces.length} | Hands ${detectedHands.length}`;
-        }
-        requestAnimationFrame(processFrame);
-    }
+            statusText.innerText = "System Active. Step into your zones.";
+            await Promise.all([
+                faceMesh.send({image: videoElement}),
+                hands.send({image: videoElement})
+            ]);
+        },
+        width: 1280, height: 720
+    });
+    camera.start();
 
-    (async () => {
-        try {
-            await initializeVisionTasks();
-            await startCamera();
-        } catch (error) {
-            console.error(error);
-            statusText.innerText = "Camera or model failed to load. Check permissions.";
-        }
-    })();
-
-    // --- MAIN GAME LOOP (Decoupled from camera FPS for smooth physics) ---
+    // --- MAIN GAME LOOP ---
     function gameLoop() {
         canvasCtx.save();
         
@@ -138,7 +123,6 @@
             canvasCtx.globalAlpha = 1.0;
         }
 
-        // Dark background for motion trails
         canvasCtx.fillStyle = 'rgba(0, 0, 5, 0.4)';
         canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
@@ -151,17 +135,33 @@
         canvasCtx.setLineDash([15, 20]);
         canvasCtx.stroke();
         canvasCtx.setLineDash([]);
+        
+        // 1. Find Players
+        let rightPlayerFace = detectedFaces.find(face => face[1].x < 0.5); 
+        let leftPlayerHand = detectedHands.find(hand => hand[0].x > 0.5); 
 
-        // NOTE: Because the canvas is mirrored horizontally, an internal X value > 0.5 
-        // renders on the LEFT side of the physical screen. 
-        
-        // 1. Find Black Hole Player (Physical Right side -> Internal X < 0.5)
-        let rightPlayerFace = detectedFaces.find(face => face[1].x < 0.5); // Landmark 1 is the nose tip
-        
+        // --- UPDATE DEBUG MODULE ---
+        if (leftPlayerHand) {
+            debugLeft.innerText = "DETECTED";
+            debugLeft.className = "status-on";
+        } else {
+            debugLeft.innerText = "NOT DETECTED";
+            debugLeft.className = "status-off";
+        }
+
+        if (rightPlayerFace) {
+            debugRight.innerText = "DETECTED";
+            debugRight.className = "status-on";
+        } else {
+            debugRight.innerText = "NOT DETECTED";
+            debugRight.className = "status-off";
+        }
+
+        // 2. Black Hole Logic
         if (rightPlayerFace) {
             let targetX = rightPlayerFace[1].x * canvasElement.width;
             let targetY = rightPlayerFace[1].y * canvasElement.height;
-            blackHole.x += (targetX - blackHole.x) * 0.2; // Smooth following
+            blackHole.x += (targetX - blackHole.x) * 0.2; 
             blackHole.y += (targetY - blackHole.y) * 0.2;
             blackHole.active = true;
             drawBlackHole(blackHole.x, blackHole.y);
@@ -169,9 +169,7 @@
             blackHole.active = false;
         }
 
-        // 2. Find Thrower Player (Physical Left side -> Internal X > 0.5)
-        let leftPlayerHand = detectedHands.find(hand => hand[0].x > 0.5); // Landmark 0 is the wrist
-
+        // 3. Thrower Logic
         if (leftPlayerHand && blackHole.active) {
             const thumb = leftPlayerHand[4];
             const index = leftPlayerHand[8];
@@ -185,7 +183,6 @@
             handVelocity.y = handY - prevHandPos.y;
             prevHandPos = { x: handX, y: handY };
 
-            // Draw Thrower Tracker
             canvasCtx.beginPath();
             canvasCtx.arc(handX, handY, 10, 0, 2 * Math.PI);
             canvasCtx.fillStyle = currentlyPinching ? '#00ffff' : 'white';
@@ -206,17 +203,16 @@
             isPinching = currentlyPinching;
         }
 
-        // 3. Physics Execution
+        // 4. Physics Execution
         if (blackHole.active) {
             updateAndDrawStars();
             updateAndDrawParticles();
         }
 
         canvasCtx.restore();
-        requestAnimationFrame(gameLoop); // Loop continuously
+        requestAnimationFrame(gameLoop); 
     }
 
-    // Start the game loop
     requestAnimationFrame(gameLoop);
 
     // --- RENDER & MATH FUNCTIONS ---
@@ -337,4 +333,3 @@
 </script>
 </body>
 </html>
-
