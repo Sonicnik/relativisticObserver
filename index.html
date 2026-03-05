@@ -3,9 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>HKU Astrophysics: Two-Player Spaghettification Sandbox</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <style>
         body { margin: 0; padding: 0; background-color: black; overflow: hidden; color: white; font-family: sans-serif; }
         canvas { display: block; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); /* Mirror display */ }
@@ -30,7 +27,13 @@
     <video id="webcam" autoplay playsinline style="display:none;"></video>
     <canvas id="output_canvas"></canvas>
 
-<script>
+<script type="module">
+    import {
+        FaceLandmarker,
+        HandLandmarker,
+        FilesetResolver
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
     const videoElement = document.getElementById('webcam');
     const canvasElement = document.getElementById('output_canvas');
     const canvasCtx = canvasElement.getContext('2d');
@@ -61,45 +64,66 @@
     let detectedHands = [];
     let currentVideoFrame = null;
 
-    // --- MEDIAPIPE INITIALIZATION ---
-    // 1. FaceMesh for the Black Hole (Supports multiple faces)
-    const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
-    faceMesh.setOptions({
-        maxNumFaces: 2,
-        refineLandmarks: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-    faceMesh.onResults((results) => { 
-        detectedFaces = results.multiFaceLandmarks || []; 
-    });
+    // --- MEDIAPIPE TASKS INITIALIZATION ---
+    let faceLandmarker = null;
+    let handLandmarker = null;
 
-    // 2. Hands for the Thrower (Supports multiple hands)
-    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-    hands.setOptions({
-        maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-    hands.onResults((results) => { 
-        detectedHands = results.multiHandLandmarks || []; 
-    });
+    async function initializeVisionTasks() {
+        const vision = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
 
-    // 3. Camera Sync
-    const camera = new Camera(videoElement, {
-        onFrame: async () => {
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath:
+                    "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+            },
+            numFaces: 2,
+            outputFaceBlendshapes: false,
+            runningMode: "VIDEO"
+        });
+
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath:
+                    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+            },
+            numHands: 2,
+            runningMode: "VIDEO"
+        });
+    }
+
+    async function startCamera() {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1280, height: 720 }
+        });
+        videoElement.srcObject = stream;
+        await videoElement.play();
+        statusText.innerText = "System Active. Step into your zones.";
+        requestAnimationFrame(processFrame);
+    }
+
+    function processFrame() {
+        if (videoElement.readyState >= 2 && faceLandmarker && handLandmarker) {
+            const now = performance.now();
+            const faceResults = faceLandmarker.detectForVideo(videoElement, now);
+            const handResults = handLandmarker.detectForVideo(videoElement, now);
+            detectedFaces = faceResults.faceLandmarks || [];
+            detectedHands = handResults.landmarks || [];
             currentVideoFrame = videoElement;
-            statusText.innerText = "System Active. Step into your zones.";
-            // Send frame to both models simultaneously
-            await Promise.all([
-                faceMesh.send({image: videoElement}),
-                hands.send({image: videoElement})
-            ]);
-        },
-        width: 1280, height: 720
-    });
-    camera.start();
+        }
+        requestAnimationFrame(processFrame);
+    }
+
+    (async () => {
+        try {
+            await initializeVisionTasks();
+            await startCamera();
+        } catch (error) {
+            console.error(error);
+            statusText.innerText = "Camera or model failed to load. Check permissions.";
+        }
+    })();
 
     // --- MAIN GAME LOOP (Decoupled from camera FPS for smooth physics) ---
     function gameLoop() {
